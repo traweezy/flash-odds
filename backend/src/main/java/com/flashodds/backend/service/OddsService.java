@@ -52,6 +52,9 @@ public class OddsService {
 
     private final Timer refreshTimer;
     private final Counter refreshErrors;
+    private final Counter refreshSuccess;
+    private final Counter snapshotFrames;
+    private final Counter deltaFrames;
 
     private Disposable refreshLoop;
 
@@ -60,6 +63,9 @@ public class OddsService {
         this.properties = properties;
         this.refreshTimer = meterRegistry.timer("flashodds.odds.refresh");
         this.refreshErrors = meterRegistry.counter("flashodds.odds.refresh.errors");
+        this.refreshSuccess = meterRegistry.counter("flashodds.odds.refresh.success");
+        this.snapshotFrames = meterRegistry.counter("flashodds.frames.snapshot");
+        this.deltaFrames = meterRegistry.counter("flashodds.frames.delta");
     }
 
     @PostConstruct
@@ -111,7 +117,10 @@ public class OddsService {
                     refreshErrors.increment();
                     sample.stop(refreshTimer);
                 })
-                .doOnSuccess(ignored -> sample.stop(refreshTimer))
+                .doOnSuccess(ignored -> {
+                    refreshSuccess.increment();
+                    sample.stop(refreshTimer);
+                })
                 .then();
     }
 
@@ -139,6 +148,7 @@ public class OddsService {
 
                 if (previous.isEmpty()) {
                     emit(snapshot);
+                    snapshotFrames.increment(snapshot.rows().size());
                     return;
                 }
 
@@ -148,6 +158,7 @@ public class OddsService {
                 }
                 var frame = new OddsFrame(OddsFrameType.DELTA, Instant.now(), changes);
                 emit(frame);
+                deltaFrames.increment(changes.size());
             } finally {
                 refreshLock.unlock();
             }

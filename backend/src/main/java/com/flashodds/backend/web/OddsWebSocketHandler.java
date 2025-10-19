@@ -3,6 +3,7 @@ package com.flashodds.backend.web;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,9 +13,11 @@ import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.flashodds.backend.web.dto.OddsFrameDto;
 import com.flashodds.backend.service.OddsService;
+import com.flashodds.backend.web.dto.OddsFrameDto;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -27,11 +30,16 @@ public class OddsWebSocketHandler implements WebSocketHandler {
     private final OddsService oddsService;
     private final OddsMapper mapper;
     private final ObjectMapper objectMapper;
+    private final AtomicInteger activeWsConnections;
 
-    public OddsWebSocketHandler(OddsService oddsService, OddsMapper mapper, ObjectMapper objectMapper) {
+    public OddsWebSocketHandler(OddsService oddsService, OddsMapper mapper, ObjectMapper objectMapper, MeterRegistry meterRegistry) {
         this.oddsService = oddsService;
         this.mapper = mapper;
         this.objectMapper = objectMapper;
+        this.activeWsConnections = new AtomicInteger(0);
+        Gauge.builder("flashodds.connections.websocket", activeWsConnections, AtomicInteger::get)
+                .description("Active websocket subscribers")
+                .register(meterRegistry);
     }
 
     @Override
@@ -44,6 +52,8 @@ public class OddsWebSocketHandler implements WebSocketHandler {
                 .map(tick -> session.textMessage("{\"type\":\"ping\",\"ts\":" + Instant.now().toEpochMilli() + "}"));
 
         return session.send(Flux.merge(oddsFlux, heartbeatFlux))
+                .doOnSubscribe(subscription -> activeWsConnections.incrementAndGet())
+                .doFinally(signalType -> activeWsConnections.decrementAndGet())
                 .and(session.receive()
                         .doOnNext(WebSocketMessage::retain)
                         .doOnNext(message -> log.trace("Received websocket message: {}", message.getPayloadAsText()))

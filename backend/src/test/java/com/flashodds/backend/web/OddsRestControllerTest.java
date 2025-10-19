@@ -64,6 +64,16 @@ class OddsRestControllerTest {
                 .jsonPath("$.type").isEqualTo("snapshot");
     }
 
+    @Test
+    void refreshEndpointTriggersUpdate() {
+        client.post()
+                .uri("/api/odds/refresh")
+                .exchange()
+                .expectStatus().isAccepted();
+
+        Mockito.verify(oddsService).refreshNow();
+    }
+
     private OddsRow sampleRow() {
         return new OddsRow(
                 "nba:test:flashbet:h2h:home",

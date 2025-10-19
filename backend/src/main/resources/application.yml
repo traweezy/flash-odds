@@ -9,8 +9,6 @@ spring:
   threads:
     virtual:
       enabled: true
-  webflux:
-    base-path: /
 
 management:
   endpoints:
