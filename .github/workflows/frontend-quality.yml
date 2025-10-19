@@ -1,0 +1,36 @@
+name: Frontend Quality
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm --dir frontend lint
+
+      - name: Typecheck
+        run: pnpm --dir frontend typecheck
+
+      - name: Unit tests
+        run: pnpm --dir frontend test
+        env:
+          CI: "true"
