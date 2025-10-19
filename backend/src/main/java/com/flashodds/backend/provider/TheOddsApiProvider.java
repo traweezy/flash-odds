@@ -16,6 +16,8 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 
 import com.flashodds.backend.config.OddsProperties;
 import com.flashodds.backend.domain.OddsRow;
+import com.flashodds.backend.provider.dto.OddsApiBookmaker;
+import com.flashodds.backend.provider.dto.OddsApiEvent;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -24,7 +26,7 @@ import reactor.core.publisher.Mono;
 public class TheOddsApiProvider implements OddsProvider {
 
     private static final Logger log = LoggerFactory.getLogger(TheOddsApiProvider.class);
-    private static final ParameterizedTypeReference<List<Map<String, Object>>> RESPONSE_TYPE =
+    private static final ParameterizedTypeReference<List<OddsApiEvent>> RESPONSE_TYPE =
             new ParameterizedTypeReference<>() {};
 
     private final WebClient webClient;
@@ -76,22 +78,18 @@ public class TheOddsApiProvider implements OddsProvider {
                 });
     }
 
-    private List<OddsRow> mapEvents(String sport, List<Map<String, Object>> events) {
+    private List<OddsRow> mapEvents(String sport, List<OddsApiEvent> events) {
         var rows = new ArrayList<OddsRow>();
         for (var event : events) {
-            var id = stringValue(event.get("id"));
-            var commence = parseInstant(event.get("commence_time"));
-            var homeTeam = stringValue(event.getOrDefault("home_team", ""));
-            var awayTeam = stringValue(event.getOrDefault("away_team", ""));
-            var title = homeTeam.isBlank() || awayTeam.isBlank()
-                    ? stringValue(event.getOrDefault("sport_title", ""))
-                    : homeTeam + " vs " + awayTeam;
-            var bookmakers = (List<Map<String, Object>>) event.getOrDefault("bookmakers", List.of());
+            var id = event.id();
+            var commence = event.commenceInstant();
+            var title = event.displayTitle();
+            var bookmakers = event.bookmakers();
+            if (bookmakers == null) {
+                continue;
+            }
             for (var book : bookmakers) {
-                var bookKey = stringValue(book.get("key"));
-                var bookTitle = stringValue(book.getOrDefault("title", bookKey));
-                var markets = (List<Map<String, Object>>) book.getOrDefault("markets", List.of());
-                rows.addAll(mapMarkets(sport, id, title, commence, bookKey, bookTitle, markets));
+                rows.addAll(mapMarkets(sport, id, title, commence, book));
             }
         }
         return rows;
@@ -102,22 +100,26 @@ public class TheOddsApiProvider implements OddsProvider {
             String eventKey,
             String title,
             Instant commence,
-            String bookKey,
-            String bookTitle,
-            List<Map<String, Object>> markets) {
+            OddsApiBookmaker bookmaker) {
         var rows = new ArrayList<OddsRow>();
-        for (var market : markets) {
-            var marketKey = stringValue(market.get("key"));
-            var outcomes = (List<Map<String, Object>>) market.getOrDefault("outcomes", List.of());
+        if (bookmaker.markets() == null) {
+            return rows;
+        }
+        for (var market : bookmaker.markets()) {
+            var marketKey = market.key();
+            var outcomes = market.outcomes();
+            if (outcomes == null) {
+                continue;
+            }
             for (var outcome : outcomes) {
-                var outcomeName = stringValue(outcome.get("name"));
-                var price = toAmericanOdds(outcome.get("price"));
-                var point = toDouble(outcome.get("point"));
+                var outcomeName = outcome.name();
+                var price = toAmericanOdds(outcome.price());
+                var point = outcome.point();
                 var rowId = String.join(":",
                         List.of(
                                 sport,
                                 eventKey,
-                                bookKey,
+                                bookmaker.key(),
                                 marketKey,
                                 normalize(outcomeName)));
                 rows.add(new OddsRow(
@@ -127,7 +129,7 @@ public class TheOddsApiProvider implements OddsProvider {
                         marketKey,
                         point,
                         price,
-                        bookTitle,
+                        bookmaker.title() == null || bookmaker.title().isBlank() ? bookmaker.key() : bookmaker.title(),
                         commence,
                         Instant.now(),
                         Map.of("source", "theoddsapi")));
@@ -136,49 +138,11 @@ public class TheOddsApiProvider implements OddsProvider {
         return rows;
     }
 
-    private String stringValue(Object value) {
-        return value == null ? "" : value.toString();
-    }
-
-    private Instant parseInstant(Object value) {
-        if (value instanceof Number number) {
-            return Instant.ofEpochSecond(number.longValue());
-        }
-        if (value instanceof String text && !text.isBlank()) {
-            try {
-                return Instant.parse(text);
-            } catch (Exception ignored) {
-            }
-        }
-        return Instant.now();
-    }
-
-    private Integer toAmericanOdds(Object value) {
-        if (value == null) {
+    private Integer toAmericanOdds(Double value) {
+        if (value == null || value.isNaN()) {
             return null;
         }
-        if (value instanceof Number number) {
-            return (int) Math.round(number.doubleValue());
-        }
-        try {
-            return (int) Math.round(Double.parseDouble(value.toString()));
-        } catch (NumberFormatException ex) {
-            return null;
-        }
-    }
-
-    private Double toDouble(Object value) {
-        if (value == null) {
-            return null;
-        }
-        if (value instanceof Number number) {
-            return number.doubleValue();
-        }
-        try {
-            return Double.parseDouble(value.toString());
-        } catch (NumberFormatException ex) {
-            return null;
-        }
+        return (int) Math.round(value);
     }
 
     private String normalize(String text) {
