@@ -18,6 +18,7 @@ dev:
 
 sync-frontend:
 	$(PNPM) --dir frontend build
+	mkdir -p backend/src/main/resources/static
 	find backend/src/main/resources/static -mindepth 1 ! -name '.gitkeep' -exec rm -rf {} +
 	cp -r frontend/dist/. backend/src/main/resources/static/
 
