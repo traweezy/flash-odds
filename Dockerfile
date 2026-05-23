@@ -1,5 +1,5 @@
 # Frontend build stage
-FROM node:20.17-alpine AS frontend-builder
+FROM node:26-alpine AS frontend-builder
 WORKDIR /app
 COPY pnpm-workspace.yaml ./
 COPY pnpm-lock.yaml ./
